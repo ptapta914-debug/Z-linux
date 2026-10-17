@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 
-# build/mkiso.sh - simple helper to create an ISO image for Z-Linux
-# Requires: xorriso or genisoimage/mkisofs present on PATH
+# build/mkiso.sh - create a bootable ISO for Z-Linux
+# Tries to produce a hybrid BIOS+UEFI ISO using grub-mkrescue when available.
+# Falls back to a simple ISO with xorriso/genisoimage if grub-mkrescue isn't present.
 
 set -euo pipefail
 
@@ -13,31 +14,46 @@ mkdir -p "$REPO_ROOT/$OUT_DIR"
 
 ISO_PATH="$REPO_ROOT/$OUT_DIR/$ISO_NAME"
 
-# Find ISO writer
-if command -v xorriso >/dev/null 2>&1; then
-    ISO_TOOL="xorriso"
-elif command -v genisoimage >/dev/null 2>&1; then
-    ISO_TOOL="genisoimage"
-elif command -v mkisofs >/dev/null 2>&1; then
-    ISO_TOOL="mkisofs"
-else
-    echo "ERROR: No ISO creation tool found (xorriso, genisoimage or mkisofs)." >&2
+echo "Building ISO for Z-Linux"
+echo "Source tree: $REPO_ROOT/$SOURCE_DIR"
+echo "Output: $ISO_PATH"
+
+# Ensure source directory exists
+if [ ! -d "$REPO_ROOT/$SOURCE_DIR" ]; then
+    echo "ERROR: Source directory '$REPO_ROOT/$SOURCE_DIR' not found."
+    echo "Populate the directory with a live filesystem tree, including /boot/vmlinuz and /boot/initrd.img."
     exit 1
 fi
 
-# Create ISO
-echo "Creating ISO: $ISO_PATH"
-
-if [ "$ISO_TOOL" = "xorriso" ]; then
-    xorriso -as mkisofs -o "$ISO_PATH" -V "$ISO_LABEL" -J -R "$REPO_ROOT/$SOURCE_DIR"
-else
-    # genisoimage/mkisofs
-    "$ISO_TOOL" -o "$ISO_PATH" -V "$ISO_LABEL" -J -R "$REPO_ROOT/$SOURCE_DIR"
+# Prefer grub-mkrescue for hybrid ISO (BIOS + UEFI)
+if command -v grub-mkrescue >/dev/null 2>&1; then
+    echo "Using grub-mkrescue to create a hybrid BIOS+UEFI ISO..."
+    # grub-mkrescue will try to embed EFI and BIOS images if available on the system
+    if grub-mkrescue -o "$ISO_PATH" "$REPO_ROOT/$SOURCE_DIR"; then
+        echo "ISO created at: $ISO_PATH"
+        exit 0
+    else
+        echo "grub-mkrescue failed; falling back to xorriso/genisoimage method..."
+    fi
 fi
 
-echo "ISO created at: $ISO_PATH"
-
-# NOTE: This simple helper does not set up hybrid/UEFI boot. For production ISOs
-# you'll typically use grub-mkrescue (grub) or xorriso with proper options to embed
-# both BIOS and EFI boot loaders. This script is a convenience to package a
-# filesystem tree into an ISO; feel free to extend it for hybrid boot support.
+# Fallback to xorriso / genisoimage / mkisofs
+if command -v xorriso >/dev/null 2>&1; then
+    echo "Using xorriso to create ISO..."
+    xorriso -as mkisofs -o "$ISO_PATH" -V "$ISO_LABEL" -J -R "$REPO_ROOT/$SOURCE_DIR"
+    echo "ISO created at: $ISO_PATH"
+    exit 0
+elif command -v genisoimage >/dev/null 2>&1; then
+    echo "Using genisoimage to create ISO..."
+    genisoimage -o "$ISO_PATH" -V "$ISO_LABEL" -J -R "$REPO_ROOT/$SOURCE_DIR"
+    echo "ISO created at: $ISO_PATH"
+    exit 0
+elif command -v mkisofs >/dev/null 2>&1; then
+    echo "Using mkisofs to create ISO..."
+    mkisofs -o "$ISO_PATH" -V "$ISO_LABEL" -J -R "$REPO_ROOT/$SOURCE_DIR"
+    echo "ISO created at: $ISO_PATH"
+    exit 0
+else
+    echo "ERROR: No ISO creation tool found (grub-mkrescue, xorriso, genisoimage or mkisofs)." >&2
+    exit 1
+fi
