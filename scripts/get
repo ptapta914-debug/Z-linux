@@ -1,4 +1,4 @@
-#!/data/data/com.termux/files/usr/bin/bash
+#!/usr/bin/env bash
 
 set -euo pipefail
 
@@ -23,6 +23,16 @@ ZLINUX_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 EDITIONS_DIR="$ZLINUX_ROOT/editions"
 
 export DEBIAN_FRONTEND=noninteractive
+
+# Ensure we have a way to run apt as root (either already root or via sudo)
+SUDO=""
+if [ "$(id -u)" -ne 0 ]; then
+    if command -v sudo >/dev/null 2>&1; then
+        SUDO="sudo"
+    else
+        die "This script must be run as root or have sudo available."
+    fi
+fi
 
 
 # ============================================================
@@ -221,7 +231,7 @@ update_database() {
 
     info "Updating package database..."
 
-    apt-get update
+    $SUDO apt-get update
 
     success "Package database updated."
 }
@@ -238,9 +248,9 @@ install_packages() {
 
     info "Installing: $*"
 
-    apt-get update
+    $SUDO apt-get update
 
-    apt-get install -y "$@"
+    $SUDO apt-get install -y "$@"
 
     echo
     success "Installation complete."
@@ -264,9 +274,7 @@ install_profile() {
     file="$(profile_file "$profile")"
 
     [ -f "$file" ] ||
-        die "Profile file not found:
-
-$file"
+        die "Profile file not found:\n\n$file"
 
     echo
     echo "================================================"
@@ -315,7 +323,7 @@ $file"
 
 
     # Update once.
-    apt-get update
+    $SUDO apt-get update
 
 
     local installed=0
@@ -331,11 +339,11 @@ $file"
 
 
         # Verify package exists in configured repositories.
-        if apt-cache show "$package" >/dev/null 2>&1; then
+        if $SUDO apt-cache show "$package" >/dev/null 2>&1; then
 
             info "Installing: $package"
 
-            if apt-get install -y "$package"; then
+            if $SUDO apt-get install -y "$package"; then
 
                 success "$package installed."
                 installed=$((installed + 1))
@@ -396,11 +404,11 @@ upgrade_system() {
 
     info "Updating package database..."
 
-    apt-get update
+    $SUDO apt-get update
 
     info "Upgrading installed packages..."
 
-    apt-get upgrade -y
+    $SUDO apt-get upgrade -y
 
     success "System upgrade complete."
 }
@@ -417,7 +425,7 @@ remove_packages() {
 
     info "Removing: $*"
 
-    apt-get remove -y "$@"
+    $SUDO apt-get remove -y "$@"
 
     success "Package removal complete."
 }
@@ -434,7 +442,7 @@ search_packages() {
 
     info "Searching for: $*"
 
-    apt-cache search "$*"
+    $SUDO apt-cache search "$*"
 }
 
 
