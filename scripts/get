@@ -3,14 +3,14 @@
 set -euo pipefail
 
 # ============================================================
-# Z-Linux Package Manager (cross-platform)
-# Supports: apt (Debian/Ubuntu), dnf/yum (Fedora/RHEL), pacman (Arch),
-# apk (Alpine), zypper (openSUSE), brew (macOS), pkg (FreeBSD).
-# Native Windows is not supported directly; use WSL/Git Bash.
+# Z-Linux Package Manager (cross-platform) - optimized
+# - Batch package installs
+# - Avoid external sort for dedupe
+# - Fallback to per-package installs only on batch failure
 # ============================================================
 
 ZLINUX_NAME="Z-Linux"
-VERSION="0.3.0"
+VERSION="0.3.1"
 
 # Locate Z-Linux root directory.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -483,7 +483,16 @@ install_profile() {
 
     [ "${#packages[@]}" -gt 0 ] || die "Profile '$profile' contains no packages."
 
-    mapfile -t packages < <(printf '%s\n' "${packages[@]}" | sort -u)
+    # dedupe packages using associative array (no external sort)
+    declare -A _seen_pkgs=()
+    local uniq_packages=()
+    for package in "${packages[@]}"; do
+        if [ -z "${_seen_pkgs[$package]:-}" ]; then
+            _seen_pkgs[$package]=1
+            uniq_packages+=("$package")
+        fi
+    done
+    packages=("${uniq_packages[@]}")
 
     info "Packages in profile: ${#packages[@]}"
     echo
@@ -493,27 +502,34 @@ install_profile() {
     local installed=0
     local skipped=0
 
-    for package in "${packages[@]}"; do
-        echo
-        echo "------------------------------------------------"
-        echo "[Profile: $profile] Checking: $package"
-        echo "------------------------------------------------"
+    # Try batch install first for performance
+    if pm_install "${packages[@]}"; then
+        installed=${#packages[@]}
+        success "Batch installed ${installed} packages from profile '$profile'."
+    else
+        warn "Batch install failed or partially failed; falling back to per-package installation for diagnostics."
+        for package in "${packages[@]}"; do
+            echo
+            echo "------------------------------------------------"
+            echo "[Profile: $profile] Checking: $package"
+            echo "------------------------------------------------"
 
-        if pm_has_package "$package"; then
-            info "Installing: $package"
+            if pm_has_package "$package"; then
+                info "Installing: $package"
 
-            if pm_install "$package"; then
-                success "$package installed."
-                installed=$((installed + 1))
+                if pm_install "$package"; then
+                    success "$package installed."
+                    installed=$((installed + 1))
+                else
+                    warn "Failed to install: $package"
+                    skipped=$((skipped + 1))
+                fi
             else
-                warn "Failed to install: $package"
+                warn "Package not available: $package"
                 skipped=$((skipped + 1))
             fi
-        else
-            warn "Package not available: $package"
-            skipped=$((skipped + 1))
-        fi
-    done
+        done
+    fi
 
     echo
     echo "================================================"
@@ -534,6 +550,18 @@ install_profiles() {
     local profiles=("$@")
 
     [ "${#profiles[@]}" -gt 0 ] || die "No profiles specified."
+
+    # dedupe profile selections
+    declare -A _seen_profiles=()
+    local uniq_profiles=()
+    local p
+    for p in "${profiles[@]}"; do
+        if [ -z "${_seen_profiles[$p]:-}" ]; then
+            _seen_profiles[$p]=1
+            uniq_profiles+=("$p")
+        fi
+    done
+    profiles=("${uniq_profiles[@]}")
 
     for profile in "${profiles[@]}"; do
         install_profile "$profile"
@@ -625,9 +653,17 @@ while [ "$#" -gt 0 ]; do
     shift
 done
 
-# Install selected profiles first
+# Install selected profiles first (dedupe without external sort)
 if [ "${#PROFILE_SELECTIONS[@]}" -gt 0 ]; then
-    mapfile -t PROFILE_SELECTIONS < <(printf '%s\n' "${PROFILE_SELECTIONS[@]}" | sort -u)
+    declare -A _seen=()
+    local uniq=()
+    for p in "${PROFILE_SELECTIONS[@]}"; do
+        if [ -z "${_seen[$p]:-}" ]; then
+            _seen[$p]=1
+            uniq+=("$p")
+        fi
+    done
+    PROFILE_SELECTIONS=("${uniq[@]}")
     install_profiles "${PROFILE_SELECTIONS[@]}"
 fi
 
@@ -683,7 +719,7 @@ case "$COMMAND" in
         exit 1
         ;;
     *)
-        # Default behavior: get python3 git curl
+        # Default behavior: install given packages
         install_packages "${NORMAL_ARGS[@]}"
         ;;
- esac
+esac
