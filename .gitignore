@@ -11,3 +11,6 @@ rootfs/
 # Editor/OS files
 *.swp
 .DS_Store
+
+# Node dependencies (installed by the compose startup command)
+node_modules/
